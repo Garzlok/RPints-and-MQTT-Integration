@@ -1,7 +1,7 @@
 /*
 NodeMCU (ESP8266)
 Dual YF-S201 Style Flow Meters and DS18B20 OneWire
-MQTT Integration with MQTT_PW
+MQTT Integration with RaspberryPints
 Special Thanks to Homebrewtalk.com Members RandR+ and Thorrak who helped make this sketch possible!
 This sketch is brought to you by coders like them!
 */
@@ -31,7 +31,7 @@ const char* password = "SSID PW";
 // MQTT Settings
 const char* mqtt_server = "raspberrypints.local";   //If your MQTT_PW has a static IP, you can use the IP address.
 const int mqtt_port = 1883;
-const char* mqtt_user = "MQTT_PW";           //If you change the MQTT user name, make sure you add that name here.
+const char* mqtt_user = "RaspberryPints";           //If you change the MQTT user name, make sure you add that name here.
 const char* mqtt_pass = "MQTT Broker PW";
 
 // Flow Sensor 1
@@ -60,7 +60,7 @@ unsigned long lastPulseTime2 = 0;
 unsigned long lastCheckTime = 0;
 
 // OneWire Settings
-#define SENSOR_PIN D7                                 // The ESP8266 pin connected to DS18B20 sensor's DQ pin
+#define SENSOR_PIN D7;                                // The ESP8266 pin connected to DS18B20 sensor's DQ pin
 const char* TZstr = "EST+5EDT,M3.2.0/2,M11.1.0/2";    // POSIX EST and Day Light Savings Time Zone
 OneWire oneWire(SENSOR_PIN);
 DallasTemperature DS18B20(&oneWire);
@@ -238,7 +238,7 @@ void reconnect() {
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
-  // Handle commands from MQTT_PW
+  // Handle commands from RaspberryPints
   Serial.print("Message received on ");
   Serial.print(topic);
   Serial.print(": ");
