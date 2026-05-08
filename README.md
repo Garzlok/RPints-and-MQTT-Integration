@@ -1,5 +1,5 @@
 # RPints-and-MQTT-Integration
-MQTT Integration of Flow Meters, Temperature Sensor, and RFID with MQTT_PW Digital Tap List
+MQTT Integration of Flow Meters, Temperature Sensor, and RFID with Raspberry Pints Digital Tap List
 
 ---
 
