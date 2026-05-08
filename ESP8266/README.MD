@@ -16,7 +16,7 @@ These sketches will allow a user to attach 2 YF-5201 Flow Meters, a DS18B20 OneW
 
 ---
 
--DS18B20 Sensor will broadcast temperature every 15 min via MQTT to MQTT_PW
+-DS18B20 Sensor will broadcast temperature every 15 min via MQTT to RaspberryPints
 
 -Sensor Payload that RaspberryPints expects:
 
