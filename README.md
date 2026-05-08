@@ -1,15 +1,15 @@
 # RPints-and-MQTT-Integration
-MQTT Integration of Flow Meters, Temperature Sensor, and RFID with Raspberry Pints Digital Tap List
+MQTT Integration of Flow Meters, Temperature Sensor, and RFID with RaspberryPints Digital Tap List
 
 ---
 
 To set=up MQTT/RPints integration using an either the ESP8266 or ESP32 microcontroller,
 Please reference:
-https://github.com/rtlindne/MQTT_PW/blob/master/README.md
+https://github.com/rtlindne/RaspberryPints/blob/master/README.md
 
 ---
 
-These sketches will allow a user to attach 2 YF-5201 Flow Meters, a DS18B20 OneWire Temperature Sensor, and a MFRC522 RFID reader to either a NodeMCU (ESP8266) or Lolin D32 (ESP32) microcontrollers and integrate with the RandR+ MQTT_PW branch via MQTT.
+These sketches will allow a user to attach 2 YF-5201 Flow Meters, a DS18B20 OneWire Temperature Sensor, and a MFRC522 RFID reader to either a NodeMCU (ESP8266) or Lolin D32 (ESP32) microcontrollers and integrate with the RandR+ RaspberryPints branch via MQTT.
 
 ---
 
