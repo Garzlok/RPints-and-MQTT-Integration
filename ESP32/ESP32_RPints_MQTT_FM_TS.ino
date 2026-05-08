@@ -1,7 +1,7 @@
 /*
 Lolin D32 (ESP32)
 Dual YF-S201 Style Flow Meters and DS18B20 OneWire
-MQTT Integration with MQTT_PW
+MQTT Integration with RaspberryPints
 Special Thanks to Homebrewtalk.com Members RandR+ and Thorrak who helped make this sketch possible!
 This sketch is brought to you by coders like them!
 */
@@ -240,7 +240,7 @@ void reconnect() {
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
-  // Handle commands from MQTT_PW
+  // Handle commands from RaspberryPints
   Serial.print("Message received on ");
   Serial.print(topic);
   Serial.print(": ");
