@@ -1,7 +1,7 @@
 /*
 Lolin D32 (ESP32)
 Dual YF-S201 Style Flow Meters, DS18B20 OneWire, and MFRC522 RFID
-MQTT Integration with MQTT_PW
+MQTT Integration with RaspberryPints
 Special Thanks to Homebrewtalk.com Members RandR+ and Thorrak who helped make this sketch possible!
 This sketch is brought to you by coders like them!
 */
@@ -32,7 +32,7 @@ const char* password = "SSID_PW";
 // MQTT Settings
 const char* mqtt_server = "raspberrypints.local";
 const int mqtt_port = 1883;
-const char* mqtt_user = "MQTT_PW";
+const char* mqtt_user = "RaspberryPints";
 const char* mqtt_pass = "MQTT_PW";
 const char* mqtt_topic = "rpints/pours"; 
 
