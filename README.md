@@ -19,6 +19,6 @@ ESP8266_RPints_MQTT_AllInOne.ino: Connect 2 YF-S201 Flow Meters, 1 DS18B20 Temp 
 
 ESP32_RPints_MQTT_FM_TR.ino: Connect 2 YF-S201 Flow Meters and 1 DS18B20 Temp Sensor
 
-ESP8232_RPints_MQTT_AllInOne.ino: Connect 2 YF-S201 Flow Meters, 1 DS18B20 Temp Sensor, and 1 MFRC522 RFID Reader
+ESP32_RPints_MQTT_AllInOne.ino: Connect 2 YF-S201 Flow Meters, 1 DS18B20 Temp Sensor, and 1 MFRC522 RFID Reader
 
 ** The ESP8266_RPints_MQTT_AllInOne.ino is not stable!! The ESP8232_RPints_MQTT_AllInOne.ino is recommended for full integration.
