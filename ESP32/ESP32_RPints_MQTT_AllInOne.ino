@@ -59,7 +59,7 @@ volatile unsigned long pulseCount2 = 0;
 // Pour tracking
 const unsigned long POUR_TIMEOUT = 2000;
 const unsigned long CHECK_INTERVAL = 100;
-const unsigned long MIN_POUR_PULSES = 100;
+const unsigned long MIN_POUR_PULSES = 200;     // Adjust as Needed
 bool pouring1 = false;
 unsigned long pourPulses1 = 0;
 unsigned long lastPulseTime1 = 0;
