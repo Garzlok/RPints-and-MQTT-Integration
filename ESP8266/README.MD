@@ -39,3 +39,75 @@ These sketches will allow a user to attach 2 YF-5201 Flow Meters, a DS18B20 OneW
 -RFID Information will only be broadcasted in the Flow Meter Payload
 
 -45 seconds after scanning the card, RFID information in RFIDTag will be removed from memory
+
+---
+NodeMCU ESP8266 Pin Assignment
+---
+
+Attaching Two(2) YF-S201 Flow Meters, One(1) DS18B20 Temperature Sensor
+
+PIN----->DEVICE
+
+A0
+
+RSV
+
+RSV
+
+SD3
+
+SD2
+
+SD1
+
+CMD
+
+SD0
+
+CLK
+
+GND
+
+3V3
+
+EN
+
+RST
+
+GND----->YF-S201 Ground (Black) Both Flow Meters
+
+VIN----->YF-S201 5V (Red) Both Flow Meters
+
+
+D0
+
+D1
+
+D2----->YF-S201 Data (yellow) Flow Meter 1
+
+D3
+
+D4
+
+3V3
+
+GND
+
+D5------>YF-S201 Data (Yellow) Flow Meter 2
+
+D6
+
+D7------>DS18B20 Data (Yellow)-----> 4.7K Ω <----- (Red) 3V3 DS18B20
+
+D8
+
+RX
+
+TX
+
+GND----->DS18B20 Ground (Black)
+
+3V3----->DS18B20 3V3 (Red)-----> 4.7K Ω <-----(Yellow) Data DS18B20
+
+
+---
