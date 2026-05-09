@@ -117,8 +117,7 @@ Attaching Two(2) YF-S201 Flow Meters, One(1) DS18B20 Temperature Sensor, One(1) 
 
 PIN---------------->DEVICE
 
-GND---------------->DS18B20 Ground (Black)
-     |------------->MFRC522 GND
+GND---------------->DS18B20 Ground (Black) and MFRC522 GND
 
 23 (MOSI)---------->MFRC522 MOSI
 
@@ -150,8 +149,7 @@ RX0
 GND---------------->YF-S201 Ground (Black) Both Flow Meters
 
 
-3V----------------->DS18B20 3V3 (Red)-----> 4.7K Ω <-----(Yellow) Data DS18B20
-     |------------->MFRC522 VCC
+3V----------------->MFRC522 VCC and DS18B20 3V3 (Red)-----> 4.7K Ω <-----(Yellow) Data DS18B20
 
 RST
 
