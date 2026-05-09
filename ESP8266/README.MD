@@ -109,5 +109,70 @@ GND----->DS18B20 Ground (Black)
 
 3V3----->DS18B20 3V3 (Red)-----> 4.7K Ω <-----(Yellow) Data DS18B20
 
+---
+Attaching Two(2) YF-S201 Flow Meters, One(1) DS18B20 Temperature Sensor, One(1) MFRC522 RFID
+
+PIN----->DEVICE
+
+A0
+
+RSV
+
+RSV
+
+SD3
+
+SD2
+
+SD1
+
+CMD
+
+SD0
+
+CLK
+
+GND
+
+3V3
+
+EN
+
+RST
+
+GND----->YF-S201 Ground (Black) Both Flow Meters
+
+VIN----->YF-S201 3V3 (Red) Both Flow Meters
+
+
+D0----->DS18B20 Data (Yellow)-----> 4.7K Ω <----- (Red) 3V3 DS18B20
+
+D1----->YF-S201 Data (yellow) Flow Meter 1
+
+D2----->YF-S201 Data (Yellow) Flow Meter 2
+
+D3
+
+D4----->MFRC522 RST
+
+3V3---->MMFRC522 VCC (Red)
+
+GND---->MFRC522 GND (Black)
+
+D5----->MOSI, MISO, or SCK
+
+D6----->MOSI, MISO, or SCK
+
+D7----->MOSI, MISO, or SCK
+
+D8----->MFRC522 SDA (SS)
+
+RX
+
+TX
+
+GND----->DS18B20 Ground (Black)
+
+3V3----->DS18B20 3V3 (Red)-----> 4.7K Ω <-----(Yellow) Data DS18B20
 
 ---
