@@ -37,6 +37,7 @@ These sketches will allow a user to attach 2 YF-5201 Flow Meters, a DS18B20 OneW
 -RFID Information will only be broadcasted in the Flow Meter Payload
 
 -45 seconds after scanning the card, RFID information in RFIDTag will be removed from memory
+
 ---
 Lolin D32 ESP32 Pin Assignment
 ---
