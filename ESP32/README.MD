@@ -37,3 +37,148 @@ These sketches will allow a user to attach 2 YF-5201 Flow Meters, a DS18B20 OneW
 -RFID Information will only be broadcasted in the Flow Meter Payload
 
 -45 seconds after scanning the card, RFID information in RFIDTag will be removed from memory
+---
+Lolin D32 ESP32 Pin Assignment
+---
+
+Attaching Two(2) YF-S201 Flow Meters, One(1) DS18B20 Temperature Sensor
+
+PIN---------------->DEVICE
+
+GND---------------->DS18B20 Ground (Black)
+
+23 (MOSI)
+
+22 (SCL)
+
+TX0
+
+RX0
+
+21 (SDA)
+
+19 (MISO)
+
+18 (SCK)
+
+5 (SS)
+
+17
+
+16
+
+4
+
+0
+
+2
+
+15
+
+GND---------------->YF-S201 Ground (Black) Both Flow Meters
+
+
+3V----------------->DS18B20 3V3 (Red)-----> 4.7K Ω <-----(Yellow) Data DS18B20
+
+RST
+
+VP
+
+VN
+
+A34
+
+A32
+
+A33
+
+DAC1 25------------>YF-S201 Data (Yellow) Flow Meter 2
+
+DAC2 26------------>YF-S201 Data (yellow) Flow Meter 1
+
+27----------------->DS18B20 Data (Yellow)-----> 4.7K Ω <----- (Red) 3V3 DS18B20
+
+14
+
+12
+
+13
+
+EN
+
+USB---------------->YF-S201 5V (Red) Both Flow Meters
+
+BAT
+
+
+---
+Attaching Two(2) YF-S201 Flow Meters, One(1) DS18B20 Temperature Sensor, One(1) MFRC522 RFID
+
+PIN---------------->DEVICE
+
+GND---------------->DS18B20 Ground (Black)
+     |------------->MFRC522 GND
+
+23 (MOSI)---------->MFRC522 MOSI
+
+22 (SCL)
+
+TX0
+
+RX0
+
+21 (SDA)
+19 (MISO)---------->MFRC522 MISO
+
+18 (SCK)----------->MFRC522 SCK
+
+5 (SS)------------->MFRC522 SS (SDA)
+
+17
+
+16
+
+4
+
+0------------------>MFRC522 RST
+
+2
+
+15
+
+GND---------------->YF-S201 Ground (Black) Both Flow Meters
+
+
+3V----------------->DS18B20 3V3 (Red)-----> 4.7K Ω <-----(Yellow) Data DS18B20
+     |------------->MFRC522 VCC
+
+RST
+
+VP
+
+VN
+
+A34
+
+A32
+
+A33
+
+DAC1 25------------>YF-S201 Data (Yellow) Flow Meter 2
+
+DAC2 26------------>YF-S201 Data (yellow) Flow Meter 1
+
+27----------------->DS18B20 Data (Yellow)-----> 4.7K Ω <----- (Red) 3V3 DS18B20
+
+14
+
+12
+
+13
+
+EN
+
+USB---------------->YF-S201 5V (Red) Both Flow Meters
+
+BAT
+---
