@@ -1,13 +1,25 @@
 /*
-NodeMCU (ESP8266)
-Dual YF-S201 Style Flow Meters, DS18B20 OneWire, and MFRC522 RFID
-MQTT Integration with RaspberryPints
-Special Thanks to Homebrewtalk.com Members RandR+ and Thorrak who made this sketch possible!
-This sketch is brought to you by coders like them!
-OneWire is on D0. Some have reported that D0 and OneWire have compatability issues. Thus far,
-those have not manifested on this sketch.
+  =============================================================================
+  MQTT integration with RaspberryPints - NodeMCU (ESP8366)
+  =============================================================================
+  Hardware:
+    - Dual YF-S201 Style Flow Meters (GPIO D1, D2)
+    - DS18B20 OneWire Temperature Sensor (GPIO D0)
+    - MFRC522 RFID Reader (SPI: SS=D8, RST=D4)
+
+  Features:
+    - MQTT integration with RaspberryPints
+    - NTP time sync with local timezone
+    - Non-blocking WiFi/MQTT reconnection
+    - Pour noise filtering (min pulse threshold)
+    - RFID tag auth with 45-second session timeout
+    - Temperature reporting every 15 minutes with retry on failure
+
+  Special Thanks to HBT Members RandR+ and Thorrak
+  ===============================================================================
 */
 
+// ─── Libraries ────────────────────────────────────────────────────────────────
 #include <PubSubClient.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -16,7 +28,7 @@ those have not manifested on this sketch.
 #include <ESP8266WiFi.h>
 #include <time.h>
 
-// Forward Declarations
+// ─── Forward Declarations──────────────────────────────────────────────────────
 void setup_wifi(); 
 void ICACHE_RAM_ATTR pulseCounter1(); 
 void ICACHE_RAM_ATTR pulseCounter2(); 
@@ -27,18 +39,18 @@ void RFIDCheckFunction();
 void sendTemp(float temp, const char* probe, const char* unit, const char* timestamp); 
 char* getTimestamp(); 
 
-// WiFi Settings
+// ─── WiFi Config ──────────────────────────────────────────────────────────────
 const char* ssid = "SSID"; 
 const char* password = "SSID_PW";
 
-// MQTT Settings
+// ─── MQTT Config ──────────────────────────────────────────────────────────────
 const char* mqtt_server = "raspberrypints.local";         // If your RaspberryPints has a static IP, you can use the IP address here.
 const int mqtt_port = 1883;
 const char* mqtt_user = "RaspberryPints";                 // If you change the MQTT Broker User name, make sure you add that name here.
-const char* mqtt_pass = "MQTT_PW";                 		    // Your MQTT Broker PW.
+const char* mqtt_pass = "MQTT_PW";                 		  // Your MQTT Broker PW.
 const char* mqtt_topic = "rpints/pours"; 
 
-// RFID Settings
+// ─── RFID Config(NodeMCU)──────────────────────────────────────────────────────
 #define SS_PIN D8
 #define RST_PIN D4
 unsigned long lastRfidCheckTime = 0;
@@ -49,17 +61,17 @@ bool tagIsActive = false;
 bool messagePrinted = false;
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
-// Flow Sensor 1
+// ─── Flow Sensor 1 Config (NodeMCU ─────────────────────────────────────────────
 const int flowPin1 = D1;                 // Avoid using D3
 const int tapNumber1 = 4;                // Change for each tap. If running an Arduino through Serial or USB in conjunction with MQTT, Do not make this a pin number already used.
 volatile unsigned long pulseCount1 = 0;
 
-// Flow Sensor 2
+// ─── Flow Sensor 2 Config (NodeMCU ─────────────────────────────────────────────
 const int flowPin2 = D2;                 // Avoid using D3
 const int tapNumber2 = 6;                // Change for each tap. If running an Arduino through Serial or USB in conjunction with MQTT, Do not make this a pin number already used.
 volatile unsigned long pulseCount2 = 0;
 
-// Pour tracking
+// ─── Pour tracking ───────────────────────────────────────────────────────────────
 const unsigned long POUR_TIMEOUT = 2000;   // ms of no flow before pour is considered done
 const unsigned long CHECK_INTERVAL = 100;  // how often to check for flow activity
 const unsigned long MIN_POUR_PULSES = 15;  // minimum pulses to count as a real pour (noise filter)
@@ -71,8 +83,8 @@ unsigned long pourPulses2 = 0;
 unsigned long lastPulseTime2 = 0;
 unsigned long lastCheckTime = 0;
 
-// OneWire Settings
-#define SENSOR_PIN D0;                                // The ESP8266 pin connected to DS18B20 sensor's DQ pin
+// ─── OneWire Settings ────────────────────────────────────────────────────────────
+#define SENSOR_PIN D0                                 // The ESP8266 pin connected to DS18B20 sensor's DQ pin
 const char* TZstr = "EST+5EDT,M3.2.0/2,M11.1.0/2";    // TZ offset set for EST and Daylight SAvings (POSIX Timezone String)
 OneWire oneWire(SENSOR_PIN);
 DallasTemperature DS18B20(&oneWire);
@@ -84,9 +96,14 @@ char probeName[24] = "Garage";                        // Name your Temp Probe to
 WiFiClient espClient;
 PubSubClient client(espClient);
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  SETUP
+// ═══════════════════════════════════════════════════════════════════════════════
+
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
   setup_wifi();
+
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
   
@@ -103,6 +120,10 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(flowPin1), pulseCounter1, FALLING);
   attachInterrupt(digitalPinToInterrupt(flowPin2), pulseCounter2, FALLING);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  LOOP
+// ═══════════════════════════════════════════════════════════════════════════════
 
 void loop() {
   // Non-blocking connection health check
@@ -165,13 +186,18 @@ void loop() {
         Serial.printf("Tap %d: discarded noise\n", tapNumber1);
       }
       
-      // Reset hardware immediately after ANY pour attempt
-      delay(100); 
-      mfrc522.PCD_Init(); 
-      memset(RFIDTag, 0, 16);
-      tagIsActive = false;
-      pouring1 = false;
-      pourPulses1 = 0;
+        // Tap 1 reset
+        pouring1 = false;
+        pourPulses1 = 0;
+        memset(RFIDTag, 0, 16);
+        tagIsActive = false;
+        detachInterrupt(digitalPinToInterrupt(flowPin1));
+        detachInterrupt(digitalPinToInterrupt(flowPin2));
+        delay(50);
+        mfrc522.PCD_Init();
+        delay(50);
+        attachInterrupt(digitalPinToInterrupt(flowPin1), pulseCounter1, FALLING);
+        attachInterrupt(digitalPinToInterrupt(flowPin2), pulseCounter2, FALLING);
     }
 
     // --- Tap 2 ---
@@ -192,27 +218,45 @@ void loop() {
         Serial.printf("Tap %d: discarded noise\n", tapNumber2);
       }
       
-      // Reset hardware immediately after ANY pour attempt
-      delay(100);
-      mfrc522.PCD_Init();
-      memset(RFIDTag, 0, 16);
-      tagIsActive = false;
-      pouring2 = false;
-      pourPulses2 = 0;
+        // Tap 2 reset
+        pouring2 = false;
+        pourPulses2 = 0;
+        memset(RFIDTag, 0, 16);
+        tagIsActive = false;
+        detachInterrupt(digitalPinToInterrupt(flowPin1));
+        detachInterrupt(digitalPinToInterrupt(flowPin2));
+        delay(50);
+        mfrc522.PCD_Init();
+        delay(50);
+        attachInterrupt(digitalPinToInterrupt(flowPin1), pulseCounter1, FALLING);
+        attachInterrupt(digitalPinToInterrupt(flowPin2), pulseCounter2, FALLING);
     }
     lastCheckTime = now;
   }
 
   // 4. Temperature tracking (every 15 mins)
-  if (now - tempTime > 900000 || tempTime == 0) {
+if (tempTime == 0 || (now - tempTime >= 900000UL)) {
+    tempTime = now;
+
     DS18B20.requestTemperatures();
     temperature_C = DS18B20.getTempCByIndex(0);
-    if (temperature_C != DEVICE_DISCONNECTED_C) {
-      temperature_F = temperature_C * 9 / 5 + 32;
-      sendTemp(temperature_F, probeName, "F", getTimestamp());
-      Serial.printf("Temperature: %.2f°F\n", temperature_F);
+
+    if (temperature_C <= -126.0 || temperature_C == 85.0) {
+        Serial.println("DS18B20 bad read, reinitializing...");
+        DS18B20.begin();
+        delay(100);
+        DS18B20.requestTemperatures();
+        delay(750);
+        temperature_C = DS18B20.getTempCByIndex(0);
     }
-    tempTime = now;
+
+    if (temperature_C > -126.0 && temperature_C != 85.0) {
+        temperature_F = temperature_C * 9.0 / 5.0 + 32.0;
+        sendTemp(temperature_F, probeName, "F", getTimestamp());
+        Serial.printf("Temperature: %.2f°F\n", temperature_F);
+    } else {
+        Serial.println("DS18B20 failed after reinit — check wiring/power");
+    }
   }
 }
 
