@@ -128,6 +128,7 @@ TX0
 RX0
 
 21 (SDA)
+
 19 (MISO)---------->MFRC522 MISO
 
 18 (SCK)----------->MFRC522 SCK
