@@ -1,11 +1,25 @@
 /*
-Lolin D32 (ESP32)
-Dual YF-S201 Style Flow Meters, DS18B20 OneWire, and MFRC522 RFID
-MQTT Integration with RaspberryPints
-Special Thanks to Homebrewtalk.com Members RandR+ and Thorrak who helped make this sketch possible!
-This sketch is brought to you by coders like them!
+  =============================================================================
+  MQTT integration with RaspberryPints - Lolin D32 (ESP32)
+  =============================================================================
+  Hardware:
+    - Dual YF-S201 Style Flow Meters (GPIO 25, 26)
+    - DS18B20 OneWire Temperature Sensor (GPIO 27)
+    - MFRC522 RFID Reader (SPI: SCK=18, MISO=19, MOSI=23, SS=5, RST=0)
+
+  Features:
+    - MQTT integration with RaspberryPints
+    - NTP time sync with local timezone
+    - Non-blocking WiFi/MQTT reconnection
+    - Pour noise filtering (min pulse threshold)
+    - RFID tag auth with 45-second session timeout
+    - Temperature reporting every 15 minutes with retry on failure
+
+  Special Thanks to HBT Members RandR+ and Thorrak
+  ===============================================================================
 */
 
+// ─── Libraries ────────────────────────────────────────────────────────────────
 #include <PubSubClient.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -14,7 +28,7 @@ This sketch is brought to you by coders like them!
 #include <WiFi.h>   
 #include <time.h>
 
-// Forward Declarations
+// ─── Forward Declarations──────────────────────────────────────────────────────
 void setup_wifi(); 
 void IRAM_ATTR pulseCounter1();
 void IRAM_ATTR pulseCounter2(); 
@@ -25,18 +39,18 @@ void RFIDCheckFunction();
 void sendTemp(float temp, const char* probe, const char* unit, const char* timestamp); 
 char* getTimestamp(); 
 
-// WiFi Settings
+// ─── WiFi Config ──────────────────────────────────────────────────────────────
 const char* ssid = "SSID"; 
 const char* password = "SSID_PW";
 
-// MQTT Settings
+// ─── MQTT Config ──────────────────────────────────────────────────────────────
 const char* mqtt_server = "raspberrypints.local";
 const int mqtt_port = 1883;
 const char* mqtt_user = "RaspberryPints";
 const char* mqtt_pass = "MQTT_PW";
 const char* mqtt_topic = "rpints/pours"; 
 
-// RFID Settings (Lolin D32 SPI: SCK=18, MISO=19, MOSI=23)
+// ─── RFID Config(Lolin D32 SPI: SCK=18, MISO=19, MOSI=23)───────────────────────
 #define SS_PIN 5
 #define RST_PIN 0
 unsigned long lastRfidCheckTime = 0;
@@ -47,7 +61,7 @@ bool tagIsActive = false;
 bool messagePrinted = false;
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
-// Flow Sensor Pins (Lolin D32)
+// ─── Flow Sensor Config (Lolin D32) ─────────────────────────────────────────────
 const int flowPin1 = 25; 
 const int tapNumber1 = 4; 
 volatile unsigned long pulseCount1 = 0;
@@ -56,10 +70,10 @@ const int flowPin2 = 26;
 const int tapNumber2 = 6; 
 volatile unsigned long pulseCount2 = 0;
 
-// Pour tracking
+// ─── Pour tracking ───────────────────────────────────────────────────────────────
 const unsigned long POUR_TIMEOUT = 2000;
 const unsigned long CHECK_INTERVAL = 100;
-const unsigned long MIN_POUR_PULSES = 200;     // Adjust as Needed
+const unsigned long MIN_POUR_PULSES = 200;
 bool pouring1 = false;
 unsigned long pourPulses1 = 0;
 unsigned long lastPulseTime1 = 0;
@@ -68,7 +82,7 @@ unsigned long pourPulses2 = 0;
 unsigned long lastPulseTime2 = 0;
 unsigned long lastCheckTime = 0;
 
-// OneWire Settings
+// ─── OneWire Settings ────────────────────────────────────────────────────────────
 #define SENSOR_PIN 27 // Safe GPIO for OneWire on D32
 const char* TZstr = "EST+5EDT,M3.2.0/2,M11.1.0/2";
 OneWire oneWire(SENSOR_PIN);
@@ -82,9 +96,14 @@ char probeName[24] = "Garage";
 WiFiClient espClient;
 PubSubClient client(espClient);
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  SETUP
+// ═══════════════════════════════════════════════════════════════════════════════
+
 void setup() {
   Serial.begin(115200);
   setup_wifi();
+
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
   
@@ -103,6 +122,10 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(flowPin1), pulseCounter1, FALLING);
   attachInterrupt(digitalPinToInterrupt(flowPin2), pulseCounter2, FALLING);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  LOOP
+// ═══════════════════════════════════════════════════════════════════════════════
 
 void loop() {
   // Non-blocking connection health check
@@ -165,13 +188,18 @@ void loop() {
         Serial.printf("Tap %d: discarded noise\n", tapNumber1);
       }
       
-      // Reset hardware immediately after ANY pour attempt
-      delay(100); 
-      mfrc522.PCD_Init(); 
-      memset(RFIDTag, 0, 16);
-      tagIsActive = false;
-      pouring1 = false;
-      pourPulses1 = 0;
+        // Tap 1 reset
+        pouring1 = false;
+        pourPulses1 = 0;
+        memset(RFIDTag, 0, 16);
+        tagIsActive = false;
+        detachInterrupt(digitalPinToInterrupt(flowPin1));
+        detachInterrupt(digitalPinToInterrupt(flowPin2));
+        delay(50);
+        mfrc522.PCD_Init();
+        delay(50);
+        attachInterrupt(digitalPinToInterrupt(flowPin1), pulseCounter1, FALLING);
+        attachInterrupt(digitalPinToInterrupt(flowPin2), pulseCounter2, FALLING);
     }
 
     // --- Tap 2 ---
@@ -192,27 +220,45 @@ void loop() {
         Serial.printf("Tap %d: discarded noise\n", tapNumber2);
       }
       
-      // Reset hardware immediately after ANY pour attempt
-      delay(100);
-      mfrc522.PCD_Init();
-      memset(RFIDTag, 0, 16);
-      tagIsActive = false;
-      pouring2 = false;
-      pourPulses2 = 0;
+        // Tap 2 reset
+        pouring2 = false;
+        pourPulses2 = 0;
+        memset(RFIDTag, 0, 16);
+        tagIsActive = false;
+        detachInterrupt(digitalPinToInterrupt(flowPin1));
+        detachInterrupt(digitalPinToInterrupt(flowPin2));
+        delay(50);
+        mfrc522.PCD_Init();
+        delay(50);
+        attachInterrupt(digitalPinToInterrupt(flowPin1), pulseCounter1, FALLING);
+        attachInterrupt(digitalPinToInterrupt(flowPin2), pulseCounter2, FALLING);
     }
     lastCheckTime = now;
   }
 
   // 4. Temperature tracking (every 15 mins)
-  if (now - tempTime > 900000 || tempTime == 0) {
+if (tempTime == 0 || (now - tempTime >= 900000UL)) {
+    tempTime = now;
+
     DS18B20.requestTemperatures();
     temperature_C = DS18B20.getTempCByIndex(0);
-    if (temperature_C != DEVICE_DISCONNECTED_C) {
-      temperature_F = temperature_C * 9 / 5 + 32;
-      sendTemp(temperature_F, probeName, "F", getTimestamp());
-      Serial.printf("Temperature: %.2f°F\n", temperature_F);
+
+    if (temperature_C <= -126.0 || temperature_C == 85.0) {
+        Serial.println("DS18B20 bad read, reinitializing...");
+        DS18B20.begin();
+        delay(100);
+        DS18B20.requestTemperatures();
+        delay(750);
+        temperature_C = DS18B20.getTempCByIndex(0);
     }
-    tempTime = now;
+
+    if (temperature_C > -126.0 && temperature_C != 85.0) {
+        temperature_F = temperature_C * 9.0 / 5.0 + 32.0;
+        sendTemp(temperature_F, probeName, "F", getTimestamp());
+        Serial.printf("Temperature: %.2f°F\n", temperature_F);
+    } else {
+        Serial.println("DS18B20 failed after reinit — check wiring/power");
+    }
   }
 }
 
@@ -268,7 +314,7 @@ void RFIDCardAction(char* RFIDTag) {
 // Non-blocking client connection routine
 bool checkMQTTConnection() {
   Serial.print("Attempting MQTT connection...");
-  String clientId = "ESP8266-taps-" + String(tapNumber1) + "-" + String(tapNumber2);
+  String clientId = "ESP32-taps-" + String(tapNumber1) + "-" + String(tapNumber2);
   if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {
     Serial.println("Connected!");
     client.subscribe("rpints");
