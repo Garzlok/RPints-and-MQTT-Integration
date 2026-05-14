@@ -1,15 +1,15 @@
 /*
   =============================================================================
-  MQTT integration with RaspberryPints - NodeMCU (ESP8366)
+  MQTT integration with RaspberryPints - NodeMCU (ESP8266)
   =============================================================================
   Hardware:
     - Dual YF-S201 Style Flow Meters (GPIO D1, D2)
     - DS18B20 OneWire Temperature Sensor (GPIO D0)
-    - MFRC522 RFID Reader (SPI: SS=D8, RST=D4)
+    - MFRC522 RFID Reader (SPI: SCK=D5, MISO=D6, MOSI=D7, SS=D8, RST=D4)
 
   Features:
     - MQTT integration with RaspberryPints
-    - NTP time sync with local timezone
+    - NTP time sync with local timezone (EST with Daylight Savings)
     - Non-blocking WiFi/MQTT reconnection
     - Pour noise filtering (min pulse threshold)
     - RFID tag auth with 45-second session timeout
@@ -19,7 +19,6 @@
   ===============================================================================
 */
 
-// ─── Libraries ────────────────────────────────────────────────────────────────
 #include <PubSubClient.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -28,7 +27,7 @@
 #include <ESP8266WiFi.h>
 #include <time.h>
 
-// ─── Forward Declarations──────────────────────────────────────────────────────
+// Forward Declarations
 void setup_wifi(); 
 void ICACHE_RAM_ATTR pulseCounter1(); 
 void ICACHE_RAM_ATTR pulseCounter2(); 
@@ -39,39 +38,40 @@ void RFIDCheckFunction();
 void sendTemp(float temp, const char* probe, const char* unit, const char* timestamp); 
 char* getTimestamp(); 
 
-// ─── WiFi Config ──────────────────────────────────────────────────────────────
+// WiFi Settings
 const char* ssid = "SSID"; 
 const char* password = "SSID_PW";
 
-// ─── MQTT Config ──────────────────────────────────────────────────────────────
+// MQTT Settings
 const char* mqtt_server = "raspberrypints.local";         // If your RaspberryPints has a static IP, you can use the IP address here.
 const int mqtt_port = 1883;
 const char* mqtt_user = "RaspberryPints";                 // If you change the MQTT Broker User name, make sure you add that name here.
 const char* mqtt_pass = "MQTT_PW";                 		  // Your MQTT Broker PW.
 const char* mqtt_topic = "rpints/pours"; 
 
-// ─── RFID Config(NodeMCU)──────────────────────────────────────────────────────
+// RFID Settings
 #define SS_PIN D8
 #define RST_PIN D4
 unsigned long lastRfidCheckTime = 0;
 unsigned int rfidCheckDelay = 250;
 unsigned long lastRfidReadTime;
-char RFIDTag[16];
-bool tagIsActive = false;
-bool messagePrinted = false;
+unsigned long lastRfidActivity = 0;
+alignas(4) char RFIDTag[16];
+volatile bool tagIsActive = false;
+volatile bool messagePrinted = false;
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
-// ─── Flow Sensor 1 Config (NodeMCU ─────────────────────────────────────────────
+// Flow Sensor 1
 const int flowPin1 = D1;                 // Avoid using D3
 const int tapNumber1 = 4;                // Change for each tap. If running an Arduino through Serial or USB in conjunction with MQTT, Do not make this a pin number already used.
 volatile unsigned long pulseCount1 = 0;
 
-// ─── Flow Sensor 2 Config (NodeMCU ─────────────────────────────────────────────
+// Flow Sensor 2
 const int flowPin2 = D2;                 // Avoid using D3
 const int tapNumber2 = 6;                // Change for each tap. If running an Arduino through Serial or USB in conjunction with MQTT, Do not make this a pin number already used.
 volatile unsigned long pulseCount2 = 0;
 
-// ─── Pour tracking ───────────────────────────────────────────────────────────────
+// Pour tracking
 const unsigned long POUR_TIMEOUT = 2000;   // ms of no flow before pour is considered done
 const unsigned long CHECK_INTERVAL = 100;  // how often to check for flow activity
 const unsigned long MIN_POUR_PULSES = 15;  // minimum pulses to count as a real pour (noise filter)
@@ -83,7 +83,7 @@ unsigned long pourPulses2 = 0;
 unsigned long lastPulseTime2 = 0;
 unsigned long lastCheckTime = 0;
 
-// ─── OneWire Settings ────────────────────────────────────────────────────────────
+// OneWire Settings
 #define SENSOR_PIN D0                                 // The ESP8266 pin connected to DS18B20 sensor's DQ pin
 const char* TZstr = "EST+5EDT,M3.2.0/2,M11.1.0/2";    // TZ offset set for EST and Daylight SAvings (POSIX Timezone String)
 OneWire oneWire(SENSOR_PIN);
@@ -96,13 +96,11 @@ char probeName[24] = "Garage";                        // Name your Temp Probe to
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  SETUP
-// ═══════════════════════════════════════════════════════════════════════════════
-
 void setup() {
   Serial.begin(9600);
+
   setup_wifi();
+  Serial.println("=== Kegerator Boot ===");
 
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
@@ -119,11 +117,9 @@ void setup() {
   pinMode(flowPin2, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(flowPin1), pulseCounter1, FALLING);
   attachInterrupt(digitalPinToInterrupt(flowPin2), pulseCounter2, FALLING);
-}
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  LOOP
-// ═══════════════════════════════════════════════════════════════════════════════
+  Serial.println("Setup complete.");
+}
 
 void loop() {
   // Non-blocking connection health check
@@ -142,8 +138,16 @@ void loop() {
 
   unsigned long now = millis();
 
-  // 1. RFID scan interval
+ // 1. RFID scan interval
   if ((now - lastRfidCheckTime) > rfidCheckDelay || lastRfidCheckTime == 0) {
+    
+    // Keepalive: reinit if reader has been idle too long
+    if ((now - lastRfidActivity > 300000UL) && !pouring1 && !pouring2) {
+        mfrc522.PCD_Init();
+        lastRfidActivity = millis();
+        Serial.println("RFID keepalive reinit");
+    }
+
     RFIDCheckFunction();
     lastRfidCheckTime = now;
   }
@@ -206,7 +210,7 @@ void loop() {
       lastPulseTime2 = now;
       if (!pouring2) {
         pouring2 = true;
-        Serial.printf("Tap %d: pour started\n", tapNumber2);
+        Serial.printf("Tap %d: pour started\n", tapNumber2);      
       }
     } else if (pouring2 && (now - lastPulseTime2 > POUR_TIMEOUT)) {
       if (pourPulses2 >= MIN_POUR_PULSES) {
@@ -241,8 +245,9 @@ if (tempTime == 0 || (now - tempTime >= 900000UL)) {
     DS18B20.requestTemperatures();
     temperature_C = DS18B20.getTempCByIndex(0);
 
+  //  Temp Probe sanity check.
     if (temperature_C <= -126.0 || temperature_C == 85.0) {
-        Serial.println("DS18B20 bad read, reinitializing...");
+        Serial.println("DS18B20 bad read, reinitializing...");        
         DS18B20.begin();
         delay(100);
         DS18B20.requestTemperatures();
@@ -253,21 +258,21 @@ if (tempTime == 0 || (now - tempTime >= 900000UL)) {
     if (temperature_C > -126.0 && temperature_C != 85.0) {
         temperature_F = temperature_C * 9.0 / 5.0 + 32.0;
         sendTemp(temperature_F, probeName, "F", getTimestamp());
-        Serial.printf("Temperature: %.2f°F\n", temperature_F);
+        Serial.printf("Temperature: %.2f°F\n", temperature_F);        
     } else {
-        Serial.println("DS18B20 failed after reinit — check wiring/power");
+        Serial.println("DS18B20 failed after reinit — check wiring/power");        
     }
   }
 }
 
 void setup_wifi() {
-  Serial.print("Connecting to WiFi");
+  Serial.print("Connecting to WiFi"); 
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.printf("\nWiFi connected\nIP: %s\n", WiFi.localIP().toString().c_str());
+  Serial.printf("\nWiFi connected\nIP: %s\n", WiFi.localIP().toString().c_str()); 
 }
 
 void ICACHE_RAM_ATTR pulseCounter1() { pulseCount1++; }
@@ -275,23 +280,38 @@ void ICACHE_RAM_ATTR pulseCounter2() { pulseCount2++; }
 
 void RFIDCheckFunction() {
   if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
-    String tempRFIDTag = "";
+    
+    // Build tag directly into a local buffer, no String object
+    char localTag[16];
+    memset(localTag, 0, sizeof(localTag));
+    
+    int pos = 0;
     for (byte i = 0; i < mfrc522.uid.size; i++) {
-      tempRFIDTag += String(mfrc522.uid.uidByte[i]);
+      pos += snprintf(localTag + pos, sizeof(localTag) - pos, "%d", mfrc522.uid.uidByte[i]);
     }
+    
     byte bcc = 0;
     for (byte i = 0; i < mfrc522.uid.size; i++) {
       bcc ^= mfrc522.uid.uidByte[i];
     }
-    if (bcc < 0x10) tempRFIDTag += "0";
-    tempRFIDTag += String(bcc);
-    tempRFIDTag.toUpperCase();
-    tempRFIDTag.toCharArray(RFIDTag, 16); 
-    
+if (bcc < 10) {
+      snprintf(localTag + pos, sizeof(localTag) - pos, "0%d", bcc);
+    } else {
+      snprintf(localTag + pos, sizeof(localTag) - pos, "%d", bcc);
+    }
+
+    // Uppercase in place
+    for (int i = 0; localTag[i]; i++) {
+      localTag[i] = toupper(localTag[i]);
+    }
+
+    // Single aligned copy, very fast, interrupt-safe
+    memcpy(RFIDTag, localTag, 16);
     tagIsActive = true;
     messagePrinted = false;
     lastRfidReadTime = millis();
     mfrc522.PICC_HaltA();
+    lastRfidActivity = millis();
   }
 }
 
@@ -312,7 +332,7 @@ void RFIDCardAction(char* RFIDTag) {
 // Non-blocking client connection routine
 bool checkMQTTConnection() {
   Serial.print("Attempting MQTT connection...");
-  String clientId = "ESP8266-taps-" + String(tapNumber1) + "-" + String(tapNumber2);
+  String clientId = "ESP32-taps-" + String(tapNumber1) + "-" + String(tapNumber2);
   if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {
     Serial.println("Connected!");
     client.subscribe("rpints");
@@ -324,7 +344,7 @@ bool checkMQTTConnection() {
 
 void callback(char* topic, byte* payload, unsigned int length) {
   Serial.printf("Message received on %s\n", topic);
-}
+}  
 
 char* getTimestamp(){
   static char buffer[80];
