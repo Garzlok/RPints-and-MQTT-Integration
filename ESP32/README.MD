@@ -17,17 +17,17 @@ These sketches will allow a user to attach 2 YF-5201 Flow Meters, a DS18B20 OneW
 -DS18B20 Sensor will broadcast temperature every 15 min via MQTT to RaspberryPints
 
 -Sensor Payload that RaspberryPints expects:
-
--"T;probe;temp;unit;timestamp"
-
+```
+"T;probe;temp;unit;timestamp"
+```
 -Flow Meters will only broadcast when a pour is initiated
 
 -Minimum of 100 pulses is needed to achieve actual pour (can be adjusted in the sketch)
 
 -Flow Meter Payload that RaspberryPints expects:
-
--"P;tagIDStatus;tapnumber;pourpulses;RFIDTag"
-
+```
+"P;tagIDStatus;tapnumber;pourpulses;RFIDTag"
+```
 -tagIDStatus is known as UserID in RaspberryPints
 
 -If no RFID Card is used, tagIDStatus is sent as "-1" which in most cases will not correspond to a user.
@@ -82,6 +82,8 @@ BAT
 ```
 
 ```
+________________________________________________________________________________
+Lolin D32 ESP32 Pin Assignment
 ____________________________________________________________________________________________
 Attaching Two(2) YF-S201 Flow Meters, One(1) DS18B20 Temperature Sensor, One(1) MFRC522 RFID
 
