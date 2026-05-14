@@ -12,7 +12,7 @@ https://github.com/rtlindne/RaspberryPints/blob/master/README.md
 
 These sketches will allow a user to attach 2 YF-5201 Flow Meters, a DS18B20 OneWire Temperature Sensor, and a MFRC522 RFID reader to a NodeMCU (ESP8266) microcontroller and integrate with the RandR+ RaspberryPints branch via MQTT.
 
-**WARNING**ESP8266_RPints_MQTT_AllInOne.ino is not stable and may stop read/reporting RFID Cards. The addition of the RFID Reader to the NodeMCU may push beyond the limits of the microcontroller. The Lolin D32 (ESP32) is recommended if the All In One is needed.**WARNING**
+**WARNING**ESP8266_RPints_MQTT_AllInOne.ino has not been tested. The Lolin D32 (ESP32) is recommended if the All In One integration is needed.**WARNING**
 
 ---
 
@@ -24,7 +24,7 @@ These sketches will allow a user to attach 2 YF-5201 Flow Meters, a DS18B20 OneW
 
 -Flow Meters will only broadcast when a pour is initiated
 
--Minimum of 100 pulses is needed to achieve actual pour (can be adjusted in the sketch)
+-Minimum pulses is needed to achieve actual pour (can be adjusted in the sketch)
 
 -Flow Meter Payload that RaspberryPints expects:
 
