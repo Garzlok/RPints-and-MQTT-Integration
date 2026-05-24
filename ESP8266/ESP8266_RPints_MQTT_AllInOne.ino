@@ -133,9 +133,7 @@ void setup() {
   Serial.println("RFID Reader Ready"); 
 
   DS18B20.begin();
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov");        // Standard ESP32 NTP config
-  setenv("TZ", TZstr, 1);
-  tzset();
+  configTime(TZstr, "pool.ntp.org", "time.nist.gov");        // Get Time with timezone offset
   
   pinMode(flowPin1, INPUT_PULLUP);
   pinMode(flowPin2, INPUT_PULLUP);
