@@ -1,6 +1,6 @@
 /*
   ================================================================================
-  MQTT integration with RaspberryPints - NodeMCU (ESP8366)
+  MQTT integration with RaspberryPints - NodeMCU (ESP8266)
   ================================================================================
   Hardware:
     - Dual YF-S201 Style Flow Meters (GPIO D1, D2)
@@ -384,7 +384,7 @@ void RFIDCardAction(char* RFIDTag) {
 // Non-blocking client connection routine
 bool checkMQTTConnection() {
   Serial.print("Attempting MQTT connection...");
-  String clientId = "ESP32-taps-" + String(tapNumber1) + "-" + String(tapNumber2);
+  String clientId = "ESP8266-taps-" + String(tapNumber1) + "-" + String(tapNumber2);
   if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {
     Serial.println("Connected!");
     client.subscribe("rpints");
