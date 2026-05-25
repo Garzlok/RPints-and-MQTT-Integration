@@ -1,7 +1,7 @@
 /*
-  =============================================================================
+  ================================================================================
   MQTT integration with RaspberryPints - Lolin D32 (ESP32)
-  =============================================================================
+  ================================================================================
   Hardware:
     - Dual YF-S201 Style Flow Meters (GPIO 25, 26)
     - DS18B20 OneWire Temperature Sensor (GPIO 27)
@@ -10,15 +10,17 @@
   Features:
     - MQTT integration with RaspberryPints
     - NTP time sync with local timezone (EST with Daylight Savings)
-    - Non-blocking WiFi/MQTT reconnection
+    - Non-blocking WiFi/MQTT Health Check reconnection
     - Pour noise filtering (min pulse threshold)
     - RFID tag auth with 45-second session timeout
-    - Temperature reporting every 15 minutes with retry on failure
+    - RFID keep alive scan
+    - Temperature reporting every 30 minutes with retry on failure
 
   Special Thanks to HBT Members RandR+ and Thorrak
-  ===============================================================================
+  ==================================================================================
 */
 
+//===LIBRARIES======================================================================
 #include <PubSubClient.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -27,7 +29,7 @@
 #include <WiFi.h>   
 #include <time.h>
 
-// Forward Declarations
+//===FORWARD DECLARATIONS===========================================================
 void setup_wifi(); 
 void IRAM_ATTR pulseCounter1();
 void IRAM_ATTR pulseCounter2(); 
@@ -36,20 +38,21 @@ bool checkMQTTConnection();
 void RFIDCardAction(char* RFIDTag);
 void RFIDCheckFunction(); 
 void sendTemp(float temp, const char* probe, const char* unit, const char* timestamp); 
-char* getTimestamp(); 
+char* getTimestamp();
+bool publishWithRetry(const char* topic, const char* payload, int retries = 3);
 
-// WiFi Settings
+//===WiFi SETTINGS==================================================================
 const char* ssid = "SSID"; 
 const char* password = "SSID_PW";
 
-// MQTT Settings
+//===MQTT SETTINGS==================================================================
 const char* mqtt_server = "raspberrypints.local";           // If your RaspberryPints has a static IP, you can use the IP address here.
 const int mqtt_port = 1883;
 const char* mqtt_user = "RaspberryPints";                   // If you change the MQTT Broker User name, make sure you add that name here.
 const char* mqtt_pass = "MQTT_PW";                          // Your MQTT Broker PW.
 const char* mqtt_topic = "rpints/pours"; 
 
-// RFID Settings (Lolin D32 SPI: SCK=18, MISO=19, MOSI=23)
+//===RFID SETTINGS (LOLIN D32 SPI: SCK=18, MISO=19, MOSI=23)========================
 #define SS_PIN 5
 #define RST_PIN 0
 unsigned long lastRfidCheckTime = 0;
@@ -61,7 +64,7 @@ volatile bool tagIsActive = false;
 volatile bool messagePrinted = false;
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
-// Flow Sensor Pins (Lolin D32)
+//===FLOW SENSON PINS (LOLIN D32)===================================================
 const int flowPin1 = 25; 
 const int tapNumber1 = 4;                                   // Change for each tap. If running an Arduino through Serial or USB in conjunction with MQTT, Do not make this a pin number already used.
 volatile unsigned long pulseCount1 = 0;
@@ -70,10 +73,11 @@ const int flowPin2 = 26;
 const int tapNumber2 = 6;                                   // Change for each tap. If running an Arduino through Serial or USB in conjunction with MQTT, Do not make this a pin number already used.
 volatile unsigned long pulseCount2 = 0;
 
-// Pour tracking
+//===POUR TRACKING==================================================================
 const unsigned long POUR_TIMEOUT = 2000;                    // ms of no flow before pour is considered done
 const unsigned long CHECK_INTERVAL = 100;                   // how often to check for flow activity
 const unsigned long MIN_POUR_PULSES = 200;                  // minimum pulses to count as a real pour (noise filter)
+const unsigned long MIN_START_PULSES = 50;                  // must see this many pulses before declaring pour started
 bool pouring1 = false;
 unsigned long pourPulses1 = 0;
 unsigned long lastPulseTime1 = 0;
@@ -82,9 +86,22 @@ unsigned long pourPulses2 = 0;
 unsigned long lastPulseTime2 = 0;
 unsigned long lastCheckTime = 0;
 
-// OneWire Settings
+//===OneWire SETTINGS===============================================================
 #define SENSOR_PIN 27                                       // Safe GPIO for OneWire on D32
-const char* TZstr = "EST+5EDT,M3.2.0/2,M11.1.0/2";          // TZ offset set for EST and Daylight SAvings (POSIX Timezone String)
+const char* TZstr = "EST+5EDT,M3.2.0/2,M11.1.0/2";          // TZ offset set for EST and Daylight SAvings (POSIX Timezone String) Change to your needs
+
+/*
+====================================================================================
+US POSIX TIMESTRINGS
+====================================================================================
+EASTERN  = EST+5EDT,M3.2.0/2,M11.1.0/2
+CENTRAL  = CST+6CDT,M3.2.0/2,M11.1.0/2
+MOUNTAIN = MST+7MDT,M3.2.0/2,M11.1.0/2
+PACIFIC  = PST+8PDT,M3.2.0/2,M11.1.0/2
+ALASKA   = AKST+9AKDT,M3.2.0/2,M11.1.0/2
+HAWAII   = HST10
+*/
+
 OneWire oneWire(SENSOR_PIN);
 DallasTemperature DS18B20(&oneWire);
 
@@ -96,6 +113,10 @@ char probeName[24] = "Garage";                              // Name your Temp Pr
 WiFiClient espClient;
 PubSubClient client(espClient);
 
+//==================================================================================
+//SETUP
+//==================================================================================
+
 void setup() {
   Serial.begin(115200);
 
@@ -103,6 +124,8 @@ void setup() {
   Serial.println("=== Kegerator Boot ===");
 
   client.setServer(mqtt_server, mqtt_port);
+  client.setKeepAlive(60);                                  // send MQTT keepalive ping every 60 seconds
+  client.setBufferSize(512);
   client.setCallback(callback);
   
   delay(1000);
@@ -123,22 +146,52 @@ void setup() {
   Serial.println("Setup complete.");
 }
 
+//==================================================================================
+//LOOP
+//==================================================================================
+
 void loop() {
-  // Non-blocking connection health check
-  if (!client.connected()) {
-    static unsigned long lastReconnectAttempt = 0;
-    unsigned long currentMillis = millis();
-    if (currentMillis - lastReconnectAttempt > 5000) {
-      lastReconnectAttempt = currentMillis;
-      if (checkMQTTConnection()) {
-        lastReconnectAttempt = 0;
+  unsigned long now = millis();
+
+  // Non-blocking MQTT connection health check
+  static unsigned long lastMqttCheck = 0;
+  if (now - lastMqttCheck > 60000UL) {  // check every 60 seconds
+    lastMqttCheck = now;
+    if (!client.connected()) {
+      Serial.println("MQTT disconnected, reconnecting...");
+      checkMQTTConnection();
+    } else {
+      // Force a ping to detect zombie connections
+      if (!client.publish("rpints/ping", "1")) {
+        Serial.println("MQTT zombie detected, forcing reconnect...");
+        client.disconnect();
+        delay(500);
+        checkMQTTConnection();
       }
     }
-  } else {
-    client.loop();
   }
+  if (client.connected()) client.loop();
 
-  unsigned long now = millis();
+  //Non-blocking  WiFi connection health check
+  static unsigned long lastWifiCheck = 0;
+  if (now - lastWifiCheck > 30000UL) {
+    lastWifiCheck = now;
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("WiFi lost, reconnecting...");
+      WiFi.disconnect();
+      WiFi.begin(ssid, password);
+      unsigned long wifiStart = millis();
+      while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 10000UL) {
+        delay(500);
+        Serial.print(".");
+      }
+      if (WiFi.status() == WL_CONNECTED) {
+        Serial.printf("\nWiFi reconnected: %s\n", WiFi.localIP().toString().c_str());
+      } else {
+        Serial.println("\nWiFi reconnect failed, will retry");
+      }
+    }
+  }
 
  // 1. RFID scan interval
   if ((now - lastRfidCheckTime) > rfidCheckDelay || lastRfidCheckTime == 0) {
@@ -172,13 +225,13 @@ void loop() {
       isNoTag = false;
     }
     if (strcmp(RFIDTag, "0") == 0) isNoTag = true;
-    const char* activeTagStatus = isNoTag ? "-1" : "";
+    const char* activeTagStatus = isNoTag ? "-1" : "";                //  Can change "-1" to any RPints User ID for a default pour with no RFID Scan
 
-    // --- Tap 1 -----------------------------------------------------------------------------------------------
+    //===TAP 1 ======================================================================
     if (count1 > 0) {
       pourPulses1 += count1;
       lastPulseTime1 = now;
-      if (!pouring1) {
+      if (!pouring1 && pourPulses1 >= MIN_START_PULSES) {
         pouring1 = true;
         Serial.printf("Tap %d: pour started\n", tapNumber1);
       }
@@ -206,11 +259,11 @@ void loop() {
         attachInterrupt(digitalPinToInterrupt(flowPin2), pulseCounter2, FALLING);
     }
 
-    // --- Tap 2 ---------------------------------------------------------------------------------------------------
+    //==TAP 2 ========================================================================
     if (count2 > 0) {
       pourPulses2 += count2;
       lastPulseTime2 = now;
-      if (!pouring2) {
+      if (!pouring2 && pourPulses2 >= MIN_START_PULSES) {
         pouring2 = true;
         Serial.printf("Tap %d: pour started\n", tapNumber2);      
       }
@@ -240,8 +293,8 @@ void loop() {
     lastCheckTime = now;
   }
 
-  // 4. Temperature tracking (every 15 mins)
-if (tempTime == 0 || (now - tempTime >= 900000UL)) {        // Set for 15 minutes, Adjust to your needs
+  // 4. Temperature tracking (every 30 mins)
+if (tempTime == 0 || (now - tempTime >= 1800000UL)) {        // Set for 30 minutes, Adjust to your needs
     tempTime = now;
 
     DS18B20.requestTemperatures();
@@ -255,14 +308,14 @@ if (tempTime == 0 || (now - tempTime >= 900000UL)) {        // Set for 15 minute
         DS18B20.requestTemperatures();
         delay(750);
         temperature_C = DS18B20.getTempCByIndex(0);
+        Serial.printf("[TEMP] After reinit: %.4f\n", temperature_C);
     }
 
     if (temperature_C > -126.0 && temperature_C != 85.0) {
         temperature_F = temperature_C * 9.0 / 5.0 + 32.0;
         sendTemp(temperature_F, probeName, "F", getTimestamp());
-        Serial.printf("Temperature: %.2f°F\n", temperature_F);        
     } else {
-        Serial.println("DS18B20 failed after reinit — check wiring/power");        
+        Serial.println("DS18B20 failed after reinit — check wiring/power");
     }
   }
 }
@@ -344,6 +397,31 @@ bool checkMQTTConnection() {
   return false;
 }
 
+bool publishWithRetry(const char* topic, const char* payload, int retries) {
+  for (int i = 0; i < retries; i++) {
+    if (client.connected() && client.publish(topic, payload)) {
+      Serial.printf("Published OK (attempt %d): %s\n", i + 1, payload);
+      return true;
+    }
+    Serial.printf("Publish failed attempt %d, rc=%d\n", i + 1, client.state());
+    client.disconnect();
+    delay(500);
+    WiFi.disconnect();
+    delay(500);
+    WiFi.begin(ssid, password);
+    unsigned long wifiStart = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 10000UL) {
+      delay(500);
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      checkMQTTConnection();
+      delay(500);
+    }
+  }
+  Serial.println("Publish failed after retries");
+  return false;
+}
+
 void callback(char* topic, byte* payload, unsigned int length) {
   Serial.printf("Message received on %s\n", topic);
 }  
@@ -361,5 +439,7 @@ char* getTimestamp(){
 void sendTemp(float temp, const char* probe, const char* unit, const char* timestamp) {
   char payload[100];
   snprintf(payload, sizeof(payload), "T;%s;%.2f;%s;%s", probe, temp, unit, timestamp);
-  if(client.connected()) client.publish(mqtt_topic, payload);
+  Serial.printf("[TEMP] Payload: %s\n", payload);
+  bool result = publishWithRetry(mqtt_topic, payload);
+  Serial.printf("[TEMP] Publish result: %s\n", result ? "OK" : "FAILED");
 }
