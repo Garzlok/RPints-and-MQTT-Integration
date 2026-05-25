@@ -1,18 +1,30 @@
 /*
-Lolin D32 (ESP32)
-Dual YF-S201 Style Flow Meters and DS18B20 OneWire
-MQTT Integration with RaspberryPints
-Special Thanks to Homebrewtalk.com Members RandR+ and Thorrak who helped make this sketch possible!
-This sketch is brought to you by coders like them!
+  =============================================================================
+  MQTT integration with RaspberryPints - Lolin D32 (ESP32)
+  =============================================================================
+  Hardware:
+    - Dual YF-S201 Style Flow Meters (GPIO 25, 26)
+    - DS18B20 OneWire Temperature Sensor (GPIO 27)
+
+  Features:
+    - MQTT integration with RaspberryPints
+    - NTP time sync with local timezone (EST with Daylight Savings)
+    - Non-blocking WiFi/MQTT reconnection
+    - Pour noise filtering (min pulse threshold)
+    - Temperature reporting every 15 minutes with retry on failure
+
+  Special Thanks to HBT Members RandR+ and Thorrak
+  ===============================================================================
 */
 
+//===LIBRARIES===================================================================
 #include <PubSubClient.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <WiFi.h>
 #include <time.h>
 
-// Forward Declarations
+//===FORWARD DECARATIONS=========================================================
 void setup_wifi(); 
 void IRAM_ATTR pulseCounter1(); 
 void IRAM_ATTR pulseCounter2(); 
@@ -24,30 +36,30 @@ const char* mqtt_topic = "rpints/pours";
 void sendTemp(float temp, const char* probe, const char* unit, const char* timestamp); 
 char* getTimestamp(); 
 
-// WiFi Settings
+//===WiFi SETTINGS===============================================================
 const char* ssid = "SSID";
 const char* password = "SSID PW";
 
-// MQTT Settings
+//===MQTT SETTINGS===============================================================
 const char* mqtt_server = "raspberrypints.local";   //If your RaspberryPints has a static IP, you can use the IP address.
 const int mqtt_port = 1883;
 const char* mqtt_user = "RaspberryPints";           //If you change the MQTT user name, make sure you add that name here.
 const char* mqtt_pass = "MQTT Broker PW";
 
-// Flow Sensor1 Pin (Lolin D32)
+//===FLOW SENSOR 1 (Lolin D32)===================================================
 const int flowPin1 = 25;                    
-const int tapNumber1 = 4;                   // Change for each tap. If running an Arduino through Serial or USB in conjunction with MQTT, Do not make this a pin number already used.
+const int tapNumber1 = 4;                           // Change for each tap. If running an Arduino through Serial or USB in conjunction with MQTT, Do not make this a pin number already used.
 volatile unsigned long pulseCount1 = 0;
 
-// Flow Sensor2 Pin (Lolin D32)
+//===FLOW SENSOR 2 (Lolin D32)===================================================
 const int flowPin2 = 26;                    
-const int tapNumber2 = 6;                   // Change for each tap. If running an Arduino through Serial or USB in conjunction with MQTT, Do not make this a pin number already used.
+const int tapNumber2 = 6;                           // Change for each tap. If running an Arduino through Serial or USB in conjunction with MQTT, Do not make this a pin number already used.
 volatile unsigned long pulseCount2 = 0;
 
-// Pour tracking
-const unsigned long POUR_TIMEOUT = 2000;     // ms of no flow before pour is considered done
-const unsigned long CHECK_INTERVAL = 100;    // how often to check for flow activity
-const unsigned long MIN_POUR_PULSES = 200;   // minimum pulses to count as a real pour (noise filter)
+//===POUR TRACKING===============================================================
+const unsigned long POUR_TIMEOUT = 2000;           // ms of no flow before pour is considered done
+const unsigned long CHECK_INTERVAL = 100;          // how often to check for flow activity
+const unsigned long MIN_POUR_PULSES = 200;         // minimum pulses to count as a real pour (noise filter)
 
 bool pouring1 = false;
 unsigned long pourPulses1 = 0;
@@ -59,20 +71,23 @@ unsigned long lastPulseTime2 = 0;
 
 unsigned long lastCheckTime = 0;
 
-// OneWire Settings
-#define SENSOR_PIN 27                                 // Safe GPIO for OneWire on D32
-const char* TZstr = "EST+5EDT,M3.2.0/2,M11.1.0/2";    // POSIX EST and Day Light Savings Time Zone
+//===OneWire SETTINGS===========================================================
+#define SENSOR_PIN 27                                   // Safe GPIO for OneWire on D32
+const char* TZstr = "EST+5EDT,M3.2.0/2,M11.1.0/2";      // POSIX EST and Day Light Savings Time Zone
 OneWire oneWire(SENSOR_PIN);
 DallasTemperature DS18B20(&oneWire);
 
-float temperature_C;                                  // temperature in Celsius
-float temperature_F;                                  // temperature in Fahrenheit
+float temperature_C;                                    // temperature in Celsius
+float temperature_F;                                    // temperature in Fahrenheit
 static unsigned long tempTime = 0;
-char probeName[24] = "Garage";                        // Name Probe for your system
+char probeName[24] = "Garage";                          // Name Probe for your system
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 
+//==============================================================================
+//SETUP
+//==============================================================================
 void setup() {
   Serial.begin(115200);
  
@@ -93,6 +108,9 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(flowPin2), pulseCounter2, FALLING);
 }
 
+//==============================================================================
+//LOOP
+//==============================================================================
 void loop() {
   if (!client.connected()) {
     reconnect();
