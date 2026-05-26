@@ -1,4 +1,5 @@
 # RPints-and-MQTT-Integration
+
 MQTT Integration of Flow Meters, Temperature Sensor, and RFID with RaspberryPints Digital Tap List
 
 ---
@@ -22,3 +23,11 @@ ESP32_RPints_MQTT_FM_TR.ino: Connect 2 YF-S201 Flow Meters and 1 DS18B20 Temp Se
 ESP32_RPints_MQTT_AllInOne.ino: Connect 2 YF-S201 Flow Meters, 1 DS18B20 Temp Sensor, and 1 MFRC522 RFID Reader
 
 ** The ESP8266_RPints_MQTT_AllInOne.ino has not been tested!! The ESP32_RPints_MQTT_AllInOne.ino is recommended for full integration.
+
+---
+The two (2) files:
+~~~
+Config.py
+FlowMonitor.py
+~~~
+Need to be placed into your RaspberryPints ...PathTo/html/python Folder
