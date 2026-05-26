@@ -6,6 +6,7 @@
 # -Th
 # Further modified by HBT Member RandR+ for the RandR+ Fork of RaspberryPints
 # rtlindne/RaspberryPints
+# Use this file in conjunction with the modified Config.py file
 #  ----------------------------------------------------------------------------
 import threading
 import time
