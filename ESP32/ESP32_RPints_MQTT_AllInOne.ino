@@ -302,6 +302,7 @@ void loop() {
     delay(100);
     tempTime = 0;  // force immediate retry
     lastSuccessfulTempReport = millis();  // reset watchdog
+  }
   
   // 4. Temperature tracking (every 30 mins)
 if (tempTime == 0 || (now - tempTime >= 1800000UL)) {        // Set for 30 minutes, Adjust to your needs
