@@ -15,6 +15,7 @@
     - RFID tag auth with 45-second session timeout
     - RFID keep alive scan
     - Temperature reporting every 30 minutes with retry on failure
+    - Temperature Watchdog if no successful report in 40 minutes, force DS18B20 reinit
 
   Special Thanks to HBT Members RandR+ and Thorrak
   ==================================================================================
@@ -109,6 +110,7 @@ float temperature_C;                                        // temperature in Ce
 float temperature_F;                                        // temperature in Fahrenheit
 static unsigned long tempTime = 0;
 char probeName[24] = "Garage";                              // Name your Temp Probe to your requirements
+unsigned long lastSuccessfulTempReport = 0;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -293,6 +295,14 @@ void loop() {
     lastCheckTime = now;
   }
 
+  // Temp watchdog — if no successful report in 40 mins, force reinit
+  if (lastSuccessfulTempReport > 0 && (now - lastSuccessfulTempReport > 2400000UL)) {
+    Serial.println("[TEMP WATCHDOG] No report in 40 min, reinitializing DS18B20...");
+    DS18B20.begin();
+    delay(100);
+    tempTime = 0;  // force immediate retry
+    lastSuccessfulTempReport = millis();  // reset watchdog
+  
   // 4. Temperature tracking (every 30 mins)
 if (tempTime == 0 || (now - tempTime >= 1800000UL)) {        // Set for 30 minutes, Adjust to your needs
     tempTime = now;
@@ -314,6 +324,7 @@ if (tempTime == 0 || (now - tempTime >= 1800000UL)) {        // Set for 30 minut
     if (temperature_C > -126.0 && temperature_C != 85.0) {
         temperature_F = temperature_C * 9.0 / 5.0 + 32.0;
         sendTemp(temperature_F, probeName, "F", getTimestamp());
+        lastSuccessfulTempReport = millis();
     } else {
         Serial.println("DS18B20 failed after reinit — check wiring/power");
     }
