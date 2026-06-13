@@ -14,7 +14,7 @@ These sketches will allow a user to attach 2 YF-5201 Flow Meters, a DS18B20 OneW
 
 ---
 
--DS18B20 Sensor will broadcast temperature every 15 min via MQTT to RaspberryPints
+-DS18B20 Sensor will broadcast temperature every 30 min via MQTT to RaspberryPints
 
 -Sensor Payload that RaspberryPints expects:
 ```
@@ -70,8 +70,8 @@ VN
 A34
 A32
 A33
-DAC1 25------------>YF-S201 Data (Yellow) Flow Meter 2
-DAC2 26------------>YF-S201 Data (yellow) Flow Meter 1
+DAC1 25------------>YF-S201 Data (Yellow) Flow Meter 1
+DAC2 26------------>YF-S201 Data (yellow) Flow Meter 2
 27----------------->DS18B20 Data (Yellow)-----> 4.7K Ω <----- (Red) 3V3 DS18B20
 14
 12
@@ -107,17 +107,17 @@ GND---------------->YF-S201 Ground (Black) Both Flow Meters
 
 _______________________________________________________________________________________________
 
-3V----------------->MFRC522 VCC and DS18B20 3V3 (Red)-----> 4.7K Ω <-----(Yellow) Data DS18B20
+3V----------------->MFRC522 VCC
 RST
 VP
 VN
 A34
 A32
 A33
-DAC1 25------------>YF-S201 Data (Yellow) Flow Meter 2
-DAC2 26------------>YF-S201 Data (yellow) Flow Meter 1
-27----------------->DS18B20 Data (Yellow)-----> 4.7K Ω <----- (Red) 3V3 DS18B20
-14
+DAC1 25------------>YF-S201 Data (Yellow) Flow Meter 1
+DAC2 26------------>YF-S201 Data (yellow) Flow Meter 2
+27----------------->DS18B20 Data (Yellow)-----> 4.7K Ω <----- (Red) Pin 14 DS18B20
+14----------------->DS18B20 3V3 (Red)-----> 4.7K Ω <-----(Yellow) Data DS18B20
 12
 13
 EN
