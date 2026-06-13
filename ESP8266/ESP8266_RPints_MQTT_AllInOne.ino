@@ -3,9 +3,9 @@
   MQTT integration with RaspberryPints - NodeMCU (ESP8266)
   ================================================================================
   Hardware:
-    - Dual YF-S201 Style Flow Meters (GPIO D1, D2)
-    - DS18B20 OneWire Temperature Sensor (GPIO D0)
-    - MFRC522 RFID Reader (SPI: SS=D8, RST=D4)
+    - Dual YF-S201 Style Flow Meters (D1, D2)
+    - DS18B20 OneWire Temperature Sensor (D0)
+    - MFRC522 RFID Reader (SPI: SCK=D5, MISO=D6, MOSI=D7, SS=D8, RST=D4)
 
   Features:
     - MQTT integration with RaspberryPints
@@ -15,7 +15,8 @@
     - RFID tag auth with 45-second session timeout
     - RFID keep alive scan
     - Temperature reporting every 30 minutes with retry on failure
-    - Temperature Watchdog if no successfule report in 40 minutes, force DS18B20 reinit
+    - Pause Temp report until proper NTP time sync
+    - MCU Reset after 2 hours of temperature not reporting
 
   Special Thanks to HBT Members RandR+ and Thorrak
   ==================================================================================
@@ -35,23 +36,34 @@ void setup_wifi();
 void ICACHE_RAM_ATTR pulseCounter1(); 
 void ICACHE_RAM_ATTR pulseCounter2(); 
 void callback(char* topic, byte* payload, unsigned int length); 
-bool checkMQTTConnection(); 
+void connectMQTT(); 
 void RFIDCardAction(char* RFIDTag);
 void RFIDCheckFunction(); 
 void sendTemp(float temp, const char* probe, const char* unit, const char* timestamp); 
 char* getTimestamp();
 bool publishWithRetry(const char* topic, const char* payload, int retries = 3);
+unsigned long requestTime = 0;
+bool waitingForConversion = false;
+const unsigned long REBOOT_TIMEOUT = 3600000UL;                             // 1 Hour
+unsigned long lastRestart = 0;
+unsigned long lastSuccessfulTempReport = 0;
+bool firstBoot = true;
 
 //===WiFi SETTINGS==================================================================
 const char* ssid = "SSID"; 
 const char* password = "SSID_PW";
 
 //===MQTT SETTINGS==================================================================
-const char* mqtt_server = "raspberrypints.local";         // If your RaspberryPints has a static IP, you can use the IP address here.
+const char* mqtt_server = "localhost.local";              // If your RaspberryPints has a static IP, you can use the IP address here.
 const int mqtt_port = 1883;
 const char* mqtt_user = "RaspberryPints";                 // If you change the MQTT Broker User name, make sure you add that name here.
 const char* mqtt_pass = "MQTT_PW";                 		    // Your MQTT Broker PW.
 const char* mqtt_topic = "rpints/pours"; 
+
+//===MQTT AVAILABILITY & LWT========================================================
+const char* statusTopic = "rpints/log";                  
+const char* payloadOnline  = "online";
+const char* payloadOffline = "offline";
 
 //===RFID SETTINGS (NodeMCU)========================================================
 #define SS_PIN D8
@@ -86,9 +98,19 @@ bool pouring2 = false;
 unsigned long pourPulses2 = 0;
 unsigned long lastPulseTime2 = 0;
 unsigned long lastCheckTime = 0;
+unsigned long lastRawPulse1 = 0;
+unsigned long lastRawPulse2 = 0;
 
 //===OneWire SETTINGS===============================================================
 #define SENSOR_PIN D0                                       // The ESP8266 pin connected to DS18B20 sensor's DQ pin
+OneWire oneWire(SENSOR_PIN);
+DallasTemperature DS18B20(&oneWire);
+float temperature_C;                                        // temperature in Celsius
+float temperature_F;                                        // temperature in Fahrenheit
+static unsigned long tempTime = 0;
+char probeName[24] = "Garage";                              // Name your Temp Probe to your requirements
+
+//===TIMESTAMP SETTINGS=============================================================
 const char* TZstr = "EST+5EDT,M3.2.0/2,M11.1.0/2";          // TZ offset set for EST and Daylight SAvings (POSIX Timezone String)
 
 /*
@@ -103,13 +125,7 @@ ALASKA   = AKST+9AKDT,M3.2.0/2,M11.1.0/2
 HAWAII   = HST10
 */
 
-OneWire oneWire(SENSOR_PIN);
-DallasTemperature DS18B20(&oneWire);
-float temperature_C;                                        // temperature in Celsius
-float temperature_F;                                        // temperature in Fahrenheit
-static unsigned long tempTime = 0;
-char probeName[24] = "Garage";                              // Name your Temp Probe to your requirements
-unsigned long lastSuccessfulTempReport = 0;
+
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -121,8 +137,14 @@ PubSubClient client(espClient);
 void setup() {
   Serial.begin(9600);
 
+  delay(1000);
+
   setup_wifi();
   Serial.println("=== Kegerator Boot ===");
+
+  configTime(TZstr, "pool.ntp.org", "time.nist.gov");        // Get Time with timezone offset
+  delay(5000);
+  Serial.printf("Timestamp: %s\n", getTimestamp());
 
   client.setServer(mqtt_server, mqtt_port);
   client.setKeepAlive(60);                                  // send MQTT keepalive ping every 60 seconds
@@ -135,12 +157,14 @@ void setup() {
   Serial.println("RFID Reader Ready"); 
 
   DS18B20.begin();
-  configTime(TZstr, "pool.ntp.org", "time.nist.gov");        // Get Time with timezone offset
+  lastSuccessfulTempReport = millis();
+  Serial.println("1Wire Temperature Ready");
   
   pinMode(flowPin1, INPUT_PULLUP);
   pinMode(flowPin2, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(flowPin1), pulseCounter1, FALLING);
   attachInterrupt(digitalPinToInterrupt(flowPin2), pulseCounter2, FALLING);
+  Serial.println("Flow Meters Ready");
 
   Serial.println("Setup complete.");
 }
@@ -152,26 +176,31 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
+  if (firstBoot) {
+      lastRestart = now;
+      firstBoot = false;
+    }
+
   // Non-blocking MQTT connection health check
   static unsigned long lastMqttCheck = 0;
-  if (now - lastMqttCheck > 60000UL) {  // check every 60 seconds
+  if (now - lastMqttCheck > 60000UL) {                                      // check every 60 seconds
     lastMqttCheck = now;
     if (!client.connected()) {
       Serial.println("MQTT disconnected, reconnecting...");
-      checkMQTTConnection();
+      connectMQTT();
     } else {
       // Force a ping to detect zombie connections
-      if (!client.publish("rpints/ping", "1")) {
+      if (!client.publish("rpints/log", "1")) {
         Serial.println("MQTT zombie detected, forcing reconnect...");
         client.disconnect();
         delay(500);
-        checkMQTTConnection();
+        connectMQTT();
       }
     }
   }
   if (client.connected()) client.loop();
 
-  //Non-blocking  WiFi connection health check
+  // Non-blocking  WiFi connection health check
   static unsigned long lastWifiCheck = 0;
   if (now - lastWifiCheck > 30000UL) {
     lastWifiCheck = now;
@@ -192,7 +221,7 @@ void loop() {
     }
   }
 
- // 1. RFID scan interval
+ // RFID scan interval
   if ((now - lastRfidCheckTime) > rfidCheckDelay || lastRfidCheckTime == 0) {
     
     // Keepalive: reinit if reader has been idle too long
@@ -206,10 +235,10 @@ void loop() {
     lastRfidCheckTime = now;
   }
 
-  // 2. Process Tag Buffer & Timeout logic
+  // Process Tag Buffer & Timeout logic
   RFIDCardAction(RFIDTag);
 
-  // 3. Flow activity & MQTT Reporting
+  // Flow activity & MQTT Reporting
   if (now - lastCheckTime > CHECK_INTERVAL) {
     noInterrupts();
     unsigned long count1 = pulseCount1;
@@ -224,7 +253,7 @@ void loop() {
       isNoTag = false;
     }
     if (strcmp(RFIDTag, "0") == 0) isNoTag = true;
-    const char* activeTagStatus = isNoTag ? "-1" : "";                //  Can change "-1" to any RPints User ID for a default pour with no RFID Scan
+    const char* activeTagStatus = isNoTag ? "-1" : "";                      //  Can change "-1" to any RPints User ID for a default pour with no RFID Scan
 
     //===TAP 1 ======================================================================
     if (count1 > 0) {
@@ -251,9 +280,7 @@ void loop() {
         tagIsActive = false;
         detachInterrupt(digitalPinToInterrupt(flowPin1));
         detachInterrupt(digitalPinToInterrupt(flowPin2));
-        delay(50);
         mfrc522.PCD_Init();
-        delay(50);
         attachInterrupt(digitalPinToInterrupt(flowPin1), pulseCounter1, FALLING);
         attachInterrupt(digitalPinToInterrupt(flowPin2), pulseCounter2, FALLING);
     }
@@ -264,7 +291,7 @@ void loop() {
       lastPulseTime2 = now;
       if (!pouring2 && pourPulses2 >= MIN_START_PULSES) {
         pouring2 = true;
-        Serial.printf("Tap %d: pour started\n", tapNumber2);      
+        Serial.printf("Tap %d: pour started\n", tapNumber2);   
       }
     } else if (pouring2 && (now - lastPulseTime2 > POUR_TIMEOUT)) {
       if (pourPulses2 >= MIN_POUR_PULSES) {
@@ -283,52 +310,95 @@ void loop() {
         tagIsActive = false;
         detachInterrupt(digitalPinToInterrupt(flowPin1));
         detachInterrupt(digitalPinToInterrupt(flowPin2));
-        delay(50);
-        mfrc522.PCD_Init();
-        delay(50);
         attachInterrupt(digitalPinToInterrupt(flowPin1), pulseCounter1, FALLING);
         attachInterrupt(digitalPinToInterrupt(flowPin2), pulseCounter2, FALLING);
     }
     lastCheckTime = now;
   }
 
-  // Temp watchdog — if no successful report in 40 mins, force reinit
-  if (lastSuccessfulTempReport > 0 && (now - lastSuccessfulTempReport > 2400000UL)) {
-    Serial.println("[TEMP WATCHDOG] No report in 40 min, reinitializing DS18B20...");
-    DS18B20.begin();
-    delay(100);
-    tempTime = 0;  // force immediate retry
-    lastSuccessfulTempReport = millis();  // reset watchdog
-  }
-  
-  // 4. Temperature tracking (every 30 mins)
-if (tempTime == 0 || (now - tempTime >= 1800000UL)) {        // Set for 30 minutes, Adjust to your needs
-    tempTime = now;
+// Temperature tracking (every 30 mins)
+  if (!waitingForConversion) {
+    if (tempTime == 0 || (now - tempTime >= 1800000UL)) {
+      tempTime = now;
 
-    DS18B20.requestTemperatures();
+      if (!isTimeSync()) {
+        Serial.println("[TEMP] Waiting for NTP sync, skipping publish");
+        tempTime = 0;
+        return;
+      }
+
+      DS18B20.setWaitForConversion(false);
+      DS18B20.requestTemperatures();
+      requestTime = millis();
+      waitingForConversion = true;
+    }
+  }
+
+  // Read the sensor exactly 1 second after requesting
+  if (waitingForConversion && (millis() - requestTime >= 1000UL)) {
+    waitingForConversion = false;
+    DS18B20.setWaitForConversion(true);
+
     temperature_C = DS18B20.getTempCByIndex(0);
 
-  //  Temp Probe sanity check.
     if (temperature_C <= -126.0 || temperature_C == 85.0) {
-        Serial.println("DS18B20 bad read, reinitializing...");        
-        DS18B20.begin();
-        delay(100);
-        DS18B20.requestTemperatures();
-        delay(750);
-        temperature_C = DS18B20.getTempCByIndex(0);
-        Serial.printf("[TEMP] After reinit: %.4f\n", temperature_C);
+      Serial.println("[TEMP] Bad read, reinitializing sensor bus...");
+      DS18B20.begin();
+      DS18B20.requestTemperatures();
+      temperature_C = DS18B20.getTempCByIndex(0);
+      Serial.printf("[TEMP] After reinit: %.4f\n", temperature_C);
     }
 
     if (temperature_C > -126.0 && temperature_C != 85.0) {
-        temperature_F = temperature_C * 9.0 / 5.0 + 32.0;
-        sendTemp(temperature_F, probeName, "F", getTimestamp());
-        lastSuccessfulTempReport = millis();
+      temperature_F = temperature_C * 9.0 / 5.0 + 32.0;
+      sendTemp(temperature_F, probeName, "F", getTimestamp());
+      lastSuccessfulTempReport = millis();
     } else {
-        Serial.println("DS18B20 failed after reinit — check wiring/power");
+      Serial.println("[TEMP] DS18B20 failed after reinit — check hardware pull-up/power");
     }
   }
+
+  // Reboot watchdog
+  if (millis() - lastSuccessfulTempReport >= REBOOT_TIMEOUT) {
+    noInterrupts();
+    unsigned long currentRawPulse1 = pulseCount1;
+    unsigned long currentRawPulse2 = pulseCount2;
+    interrupts();
+
+    bool rawPulsesMoving1 = (currentRawPulse1 != lastRawPulse1);
+    bool rawPulsesMoving2 = (currentRawPulse2 != lastRawPulse2);
+    lastRawPulse1 = currentRawPulse1;
+    lastRawPulse2 = currentRawPulse2;
+
+    if (pouring1 || pouring2 || rawPulsesMoving1 || rawPulsesMoving2) {
+      Serial.println("[SAFETY] Temp dead, but active flow detected. Delaying reboot...");
+    } else {
+      Serial.println("[CRITICAL] Temp sensor dead for 1 hour. Rebooting...");
+      if (client.connected()) {
+        client.publish(statusTopic, payloadOffline, true);
+        client.disconnect();
+        delay(500);
+      }
+      Serial.flush();
+      delay(1000);
+      ESP.restart();
+    }
+  } else {
+    noInterrupts();
+    lastRawPulse1 = pulseCount1;
+    lastRawPulse2 = pulseCount2;
+    interrupts();
+  }
+
 }
 
+//==================================================================================
+//HELPER FUNCTIONS
+//==================================================================================
+
+// ---------------------------------------------------------------------------------
+// WIFI
+// ---------------------------------------------------------------------------------
 void setup_wifi() {
   Serial.print("Connecting to WiFi");
   WiFi.begin(ssid, password);
@@ -336,12 +406,18 @@ void setup_wifi() {
     delay(500);
     Serial.print(".");
   }
-  Serial.printf("\nWiFi connected\nIP: %s\n", WiFi.localIP().toString().c_str());
+  Serial.printf("\nWiFi connected\nIP: %s\n", WiFi.localIP().toString().c_str()); 
 }
 
+// ---------------------------------------------------------------------------------
+// INTERRUPT SERVICE ROUTINES
+// ---------------------------------------------------------------------------------
 void ICACHE_RAM_ATTR pulseCounter1() { pulseCount1++; }
 void ICACHE_RAM_ATTR pulseCounter2() { pulseCount2++; }
 
+// ---------------------------------------------------------------------------------
+// RFID TAG STRING BUILDER
+// ---------------------------------------------------------------------------------
 void RFIDCheckFunction() {
   if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
     
@@ -393,39 +469,32 @@ void RFIDCardAction(char* RFIDTag) {
   }
 }
 
+// ---------------------------------------------------------------------------------
+// MQTT with LWT
+// ---------------------------------------------------------------------------------
 // Non-blocking client connection routine
-bool checkMQTTConnection() {
+void connectMQTT() {
   Serial.print("Attempting MQTT connection...");
-  String clientId = "ESP8266-taps-" + String(tapNumber1) + "-" + String(tapNumber2);
-  if (client.connect(clientId.c_str(), mqtt_user, mqtt_pass)) {
-    Serial.println("Connected!");
-    client.subscribe("rpints");
-    return true;
+  if (client.connect("RPints-ESP8266", mqtt_user, mqtt_pass, statusTopic, 1, true, payloadOffline)) {
+    Serial.println("connected");
+    client.publish(statusTopic, payloadOnline, true);
+  } else {
+    Serial.printf("failed, rc=%d, will retry\n", client.state());
   }
-  Serial.printf("Failed, rc=%d. Will try again.\n", client.state());
-  return false;
 }
 
 bool publishWithRetry(const char* topic, const char* payload, int retries) {
   for (int i = 0; i < retries; i++) {
+    if (!client.connected()) {
+      connectMQTT();
+      delay(200);
+    }
     if (client.connected() && client.publish(topic, payload)) {
       Serial.printf("Published OK (attempt %d): %s\n", i + 1, payload);
       return true;
     }
     Serial.printf("Publish failed attempt %d, rc=%d\n", i + 1, client.state());
-    client.disconnect();
-    delay(500);
-    WiFi.disconnect();
-    delay(500);
-    WiFi.begin(ssid, password);
-    unsigned long wifiStart = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 10000UL) {
-      delay(500);
-    }
-    if (WiFi.status() == WL_CONNECTED) {
-      checkMQTTConnection();
-      delay(500);
-    }
+    delay(200);
   }
   Serial.println("Publish failed after retries");
   return false;
@@ -435,6 +504,9 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.printf("Message received on %s\n", topic);
 }  
 
+// ---------------------------------------------------------------------------------
+// TIMESTAMP HELPER
+// ---------------------------------------------------------------------------------
 char* getTimestamp(){
   static char buffer[80];
   time_t timer;
@@ -445,6 +517,17 @@ char* getTimestamp(){
   return buffer;
 }
 
+// ---------------------------------------------------------------------------------
+// NTP TIME SYNC
+// ---------------------------------------------------------------------------------
+bool isTimeSync() {
+  time_t now = time(nullptr);
+  return now > 1000000000UL;
+}
+
+// ---------------------------------------------------------------------------------
+// TEMPERATURE PUBLISH
+// ---------------------------------------------------------------------------------
 void sendTemp(float temp, const char* probe, const char* unit, const char* timestamp) {
   char payload[100];
   snprintf(payload, sizeof(payload), "T;%s;%.2f;%s;%s", probe, temp, unit, timestamp);
